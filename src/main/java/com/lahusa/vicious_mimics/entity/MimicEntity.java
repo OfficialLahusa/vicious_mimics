@@ -3,10 +3,15 @@ package com.lahusa.vicious_mimics.entity;
 import com.lahusa.vicious_mimics.entity.ai.goal.MimicSitGoal;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ai.control.MoveControl;
+import net.minecraft.entity.ai.goal.FollowMobGoal;
 import net.minecraft.entity.ai.goal.WanderAroundFarGoal;
+import net.minecraft.entity.ai.goal.WanderAroundGoal;
 import net.minecraft.entity.attribute.DefaultAttributeContainer;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.entity.data.DataTracker;
+import net.minecraft.entity.data.TrackedData;
+import net.minecraft.entity.data.TrackedDataHandlerRegistry;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.passive.PassiveEntity;
 import net.minecraft.entity.passive.TameableEntity;
@@ -30,6 +35,7 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 
 public class MimicEntity extends TameableEntity implements GeoEntity {
 
+    public static final TrackedData<Boolean> IS_JUMPING = DataTracker.registerData(MimicEntity.class, TrackedDataHandlerRegistry.BOOLEAN);
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
     private int delayTicks;
@@ -47,27 +53,40 @@ public class MimicEntity extends TameableEntity implements GeoEntity {
     protected void initGoals() {
         super.initGoals();
         this.goalSelector.add(1, new MimicSitGoal(this));
-        this.goalSelector.add(2, new WanderAroundFarGoal(this, 1.0));
+        this.goalSelector.add(3, new WanderAroundGoal(this, 1.0));
+        this.goalSelector.add(4, new WanderAroundFarGoal(this, 1.0));
     }
 
     private <E extends GeoEntity> PlayState predicate(AnimationState<E> event) {
         RawAnimation anim = RawAnimation.begin();
 
-        if(isSitting()) {
+        if(isJumping()) {
+            anim = anim.thenPlay("animation.mimic.jump");
+        }
+        else if(isSitting()) {
             if(transitioning) anim = anim.thenPlay("animation.mimic.close");
-            event.getController().setAnimation(anim.thenPlay("animation.mimic.idle_closed"));
-            return PlayState.CONTINUE;
+            anim = anim.thenPlay("animation.mimic.idle_closed");
+        }
+        else {
+            if(transitioning) anim = anim.thenPlay("animation.mimic.open");
+            anim = anim.thenPlay("animation.mimic.idle_open");
         }
 
-        if(transitioning) anim = anim.thenPlay("animation.mimic.open");
-        event.getController().setAnimation(anim.thenPlay("animation.mimic.idle_open"));
+        event.getController().setAnimation(anim);
         return PlayState.CONTINUE;
     }
 
     @Override
     public void tick() {
         super.tick();
+
+        // Decrement delay
         if(delayTicks > 0) --delayTicks;
+
+        // Stop jumping when on ground or in fluid
+        if(isJumping() && (isOnGround() || isTouchingWater() || isInLava())) {
+            setIsJumping(false);
+        }
     }
 
     @Override
@@ -120,6 +139,7 @@ public class MimicEntity extends TameableEntity implements GeoEntity {
     @Override
     protected void initDataTracker() {
         super.initDataTracker();
+        dataTracker.startTracking(IS_JUMPING, false);
     }
 
     @Override
@@ -132,8 +152,16 @@ public class MimicEntity extends TameableEntity implements GeoEntity {
         return false;
     }
 
+    public boolean isJumping() {
+        return dataTracker.get(IS_JUMPING);
+    }
+
+    protected void setIsJumping(boolean value) {
+        dataTracker.set(IS_JUMPING, value);
+    }
+
     private static class MimicMoveControl extends MoveControl {
-        private float targetYaw;
+        private final float targetYaw;
         private int ticksUntilJump;
         private final MimicEntity mimic;
         private boolean jumpOften;
@@ -141,47 +169,38 @@ public class MimicEntity extends TameableEntity implements GeoEntity {
         public MimicMoveControl(MimicEntity mimic) {
             super(mimic);
             this.mimic = mimic;
-            this.targetYaw = 180.0F * mimic.getYaw() / 3.1415927F;
-        }
-
-        public void look(float targetYaw, boolean jumpOften) {
-            this.targetYaw = targetYaw;
-            this.jumpOften = jumpOften;
-        }
-
-        public void move(double speed) {
-            this.speed = speed;
-            this.state = State.MOVE_TO;
+            targetYaw = 180.0F * mimic.getYaw() / 3.1415927F;
         }
 
         public void tick() {
-            this.entity.setYaw(this.wrapDegrees(this.entity.getYaw(), this.targetYaw, 90.0F));
-            this.entity.headYaw = this.entity.getYaw();
-            this.entity.bodyYaw = this.entity.getYaw();
-            if (this.state != State.MOVE_TO) {
-                this.entity.setForwardSpeed(0.0F);
+            entity.setYaw(wrapDegrees(entity.getYaw(), targetYaw, 90.0F));
+            entity.headYaw = entity.getYaw();
+            entity.bodyYaw = entity.getYaw();
+            if (state != State.MOVE_TO) {
+                entity.setForwardSpeed(0.0F);
             } else {
-                this.state = State.WAIT;
-                if (this.entity.isOnGround()) {
-                    this.entity.setMovementSpeed((float)(this.speed * this.entity.getAttributeValue(EntityAttributes.GENERIC_MOVEMENT_SPEED)));
-                    if (this.ticksUntilJump-- <= 0) {
-                        this.ticksUntilJump = 5; //this.mimic.getTicksUntilNextJump();
-                        if (this.jumpOften) {
-                            this.ticksUntilJump /= 3;
+                state = State.WAIT;
+                if (entity.isOnGround()) {
+                    entity.setMovementSpeed((float)(speed * entity.getAttributeValue(EntityAttributes.GENERIC_MOVEMENT_SPEED)));
+                    if (ticksUntilJump-- <= 0) {
+                        ticksUntilJump = 5; //this.mimic.getTicksUntilNextJump();
+                        if (jumpOften) {
+                            ticksUntilJump /= 3;
                         }
 
-                        this.mimic.getJumpControl().setActive();
+                        mimic.getJumpControl().setActive();
+                        mimic.setIsJumping(true);
 
                         if (!mimic.world.isClient) {
                             mimic.world.playSound(null, mimic.getX(), mimic.getY(), mimic.getZ(), SoundEvents.BLOCK_CHEST_OPEN, SoundCategory.HOSTILE, 1f, 1f);
                         }
                     } else {
-                        this.mimic.sidewaysSpeed = 0.0F;
-                        this.mimic.forwardSpeed = 0.0F;
-                        this.entity.setMovementSpeed(0.0F);
+                        mimic.sidewaysSpeed = 0.0F;
+                        mimic.forwardSpeed = 0.0F;
+                        entity.setMovementSpeed(0.0F);
                     }
                 } else {
-                    this.entity.setMovementSpeed((float)(this.speed * this.entity.getAttributeValue(EntityAttributes.GENERIC_MOVEMENT_SPEED)));
+                    entity.setMovementSpeed((float)(speed * entity.getAttributeValue(EntityAttributes.GENERIC_MOVEMENT_SPEED)));
                 }
 
             }
