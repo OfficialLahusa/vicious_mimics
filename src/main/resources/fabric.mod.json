@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "vicious_mimics",
+  "version": "${version}",
+  "name": "Vicious Mimics",
+  "description": "Adds deadly mimics that have a chance to spawn instead of dungeon chests.",
+  "authors": [
+    "Lahusa"
+  ],
+  "contact": {
+    "website": "https://github.com/OfficialLahusa",
+    "repo": "https://github.com/OfficialLahusa/vicious_mimics"
+  },
+  "license": "MIT",
+  "icon": "assets/vicious_mimics/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "client": [
+      "com.lahusa.vicious_mimics.client.ViciousMimicsModClient"
+    ],
+    "main": [
+      "com.lahusa.vicious_mimics.ViciousMimicsMod"
+    ]
+  },
+  "mixins": [
+    "vicious_mimics.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.14.14",
+    "fabric": "*",
+    "minecraft": "1.19.3"
+  }
+}
